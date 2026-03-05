@@ -103,7 +103,7 @@ async function callBuiltIn(req: LLMRequest): Promise<LLMResponse> {
   const response = await fetch(apiUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: req.model || "gpt-4o-mini", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
+    body: JSON.stringify({ model: req.model || "gpt-4.1-mini", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
   });
   if (!response.ok) throw new Error(`Built-in LLM error ${response.status}: ${await response.text()}`);
   const data = await response.json() as any;
@@ -479,7 +479,7 @@ export async function testProviderApiKey(provider: string, apiKey: string, baseU
 }
 
 export const PROVIDER_METADATA = {
-  "built-in": { name: "Built-in", icon: "⚡", models: ["gpt-4o-mini"], requiresKey: false },
+  "built-in": { name: "Built-in", icon: "⚡", models: ["gpt-4.1-mini", "gpt-4.1-nano", "gemini-2.5-flash"], requiresKey: false },
   openai: { name: "OpenAI", icon: "🔑", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo", "o1", "o1-mini", "o3-mini"], requiresKey: true },
   claude: { name: "Anthropic Claude", icon: "🧠", models: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"], requiresKey: true },
   gemini: { name: "Google Gemini", icon: "✨", models: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"], requiresKey: true },
