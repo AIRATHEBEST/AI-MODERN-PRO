@@ -1,50 +1,47 @@
 # AI MODERN PRO
 
-A full-featured AI assistant web application with real Supabase authentication and PostgreSQL database.
+A production-ready AI assistant with Supabase authentication and multi-provider support.
+
+## Quick Start
+
+```bash
+pnpm install
+pnpm start
+```
+
+Open `http://localhost:3000` and login with:
+- **Email:** ntshongwanae@gmail.com
+- **Password:** @960145404
 
 ## Features
 
-- **Real Supabase Auth** — Email/password authentication via Supabase
-- **PostgreSQL Database** — All data stored in Supabase (conversations, messages, API keys, etc.)
+- **Supabase Auth** — Email/password authentication
+- **PostgreSQL** — Supabase database for all data
 - **Multi-Provider AI** — OpenAI, Claude, Gemini, Deepseek, Grok, HuggingFace, Ollama
-- **SSE Streaming** — Real-time streaming responses
+- **SSE Streaming** — Real-time AI responses
 - **File Upload** — Attach files to conversations
-- **Image Generation** — Generate images with AI
-- **RAG Search** — Document-based retrieval augmented generation
+- **Image Generation** — AI-powered image creation
+- **RAG Search** — Document retrieval
 - **Code Execution** — Run code snippets
 - **Prompt Templates** — Save and reuse prompts
-- **Model Benchmarks** — Compare AI providers
-- **Export** — Export conversations in multiple formats
-- **Dark Mode** — System/light/dark theme support
-
-## Setup
-
-1. Clone the repository
-2. Copy `.env` and fill in your values (all Supabase credentials are pre-configured)
-3. Install dependencies: `pnpm install`
-4. Start the server: `pnpm run start`
-
-## Default User
-
-- **Email:** Ntshongwanae@gmail.com
-- **Password:** @960145404
-
-## Environment Variables
-
-All required variables are pre-configured in `.env`:
-
-| Variable | Description |
-|---|---|
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_ANON_KEY` | Supabase anonymous key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (for server-side operations) |
-| `JWT_SECRET` | Secret for signing session cookies |
-| `OWNER_OPEN_ID` | Supabase user ID for admin access |
+- **Benchmarks** — Compare AI models
+- **Export** — Download conversations
+- **Dark Mode** — Theme support
 
 ## Tech Stack
 
 - **Frontend:** React + TypeScript + TailwindCSS + tRPC
 - **Backend:** Node.js + Express + tRPC
 - **Database:** Supabase (PostgreSQL)
-- **Auth:** Supabase Auth (email/password)
+- **Auth:** Supabase Auth
 - **Build:** Vite
+
+## Environment
+
+All Supabase credentials are pre-configured in `.env`. The default user is created automatically on first startup.
+
+## Scripts
+
+- `pnpm start` — Start production server
+- `pnpm dev` — Start development server
+- `pnpm build` — Build for production

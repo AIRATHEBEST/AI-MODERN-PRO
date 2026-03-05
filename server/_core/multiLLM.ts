@@ -1,6 +1,6 @@
 /**
  * Multi-Provider LLM Router
- * Supports: OpenAI, Anthropic Claude, Google Gemini, Ollama, Hugging Face, Deepseek, Grok, Puter
+ * Supports: OpenAI, Anthropic Claude, Google Gemini, Ollama, Hugging Face, Deepseek, Grok, Groq, Mistral, Cohere, OpenRouter, Puter
  * Features: True SSE streaming, model auto-detection, configurable base URLs
  */
 
@@ -379,6 +379,155 @@ export async function* streamDeepseek(req: LLMRequest): AsyncGenerator<StreamChu
   yield* parseSSEStream(response);
 }
 
+// Groq (ultra-fast inference)
+async function callGroq(req: LLMRequest): Promise<LLMResponse> {
+  console.log("[Groq] Calling model:", req.model || "llama-3.3-70b-versatile");
+  console.log("[Groq] Has API key:", !!req.apiKey);
+  if (!req.apiKey) throw new Error("Groq API key not provided");
+  const baseUrl = (req.baseUrl || "https://api.groq.com").replace(/\/$/, "");
+  console.log("[Groq] URL:", `${baseUrl}/openai/v1/chat/completions`);
+  const response = await fetch(`${baseUrl}/openai/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "llama-3.3-70b-versatile", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
+  });
+  console.log("[Groq] Response status:", response.status);
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("[Groq] Error:", text);
+    throw new Error(`Groq error ${response.status}: ${text}`);
+  }
+  const data = await response.json() as any;
+  console.log("[Groq] Success, content length:", data.choices[0]?.message.content?.length);
+  return { content: data.choices[0]?.message.content || "", promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens, totalTokens: data.usage?.total_tokens, model: data.model || req.model, provider: "groq" };
+}
+
+export async function* streamGroq(req: LLMRequest): AsyncGenerator<StreamChunk> {
+  console.log("[Groq Stream] Starting stream for model:", req.model);
+  if (!req.apiKey) { yield { type: "error", error: "Groq API key not provided" }; return; }
+  const baseUrl = (req.baseUrl || "https://api.groq.com").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/openai/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "llama-3.3-70b-versatile", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7, stream: true }),
+  });
+  console.log("[Groq Stream] Response status:", response.status);
+  if (!response.ok) { 
+    const text = await response.text();
+    console.error("[Groq Stream] Error:", text);
+    yield { type: "error", error: `Groq error ${response.status}: ${text}` }; 
+    return; 
+  }
+  let chunkCount = 0;
+  for await (const chunk of parseSSEStream(response)) {
+    chunkCount++;
+    yield chunk;
+  }
+  console.log("[Groq Stream] Completed. Chunks:", chunkCount);
+}
+
+// Mistral
+async function callMistral(req: LLMRequest): Promise<LLMResponse> {
+  if (!req.apiKey) throw new Error("Mistral API key not provided");
+  const baseUrl = (req.baseUrl || "https://api.mistral.ai").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "mistral-large", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
+  });
+  if (!response.ok) throw new Error(`Mistral error ${response.status}: ${await response.text()}`);
+  const data = await response.json() as any;
+  return { content: data.choices[0]?.message.content || "", promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens, totalTokens: data.usage?.total_tokens, model: data.model || req.model, provider: "mistral" };
+}
+
+export async function* streamMistral(req: LLMRequest): AsyncGenerator<StreamChunk> {
+  if (!req.apiKey) { yield { type: "error", error: "Mistral API key not provided" }; return; }
+  const baseUrl = (req.baseUrl || "https://api.mistral.ai").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "mistral-large", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7, stream: true }),
+  });
+  if (!response.ok) { yield { type: "error", error: `Mistral error ${response.status}: ${await response.text()}` }; return; }
+  yield* parseSSEStream(response);
+}
+
+// Cohere
+async function callCohere(req: LLMRequest): Promise<LLMResponse> {
+  if (!req.apiKey) throw new Error("Cohere API key not provided");
+  const baseUrl = (req.baseUrl || "https://api.cohere.ai").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/v1/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "command-r", message: req.messages[req.messages.length - 1]?.content || "", chat_history: req.messages.slice(0, -1).map(m => ({ role: m.role === "assistant" ? "CHATBOT" : "USER", message: m.content })), max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
+  });
+  if (!response.ok) throw new Error(`Cohere error ${response.status}: ${await response.text()}`);
+  const data = await response.json() as any;
+  return { content: data.text || "", model: req.model || "command-r", provider: "cohere" };
+}
+
+export async function* streamCohere(req: LLMRequest): AsyncGenerator<StreamChunk> {
+  if (!req.apiKey) { yield { type: "error", error: "Cohere API key not provided" }; return; }
+  const baseUrl = (req.baseUrl || "https://api.cohere.ai").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/v1/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "command-r", message: req.messages[req.messages.length - 1]?.content || "", chat_history: req.messages.slice(0, -1).map(m => ({ role: m.role === "assistant" ? "CHATBOT" : "USER", message: m.content })), max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7, stream: true }),
+  });
+  if (!response.ok) { yield { type: "error", error: `Cohere error ${response.status}: ${await response.text()}` }; return; }
+  if (!response.body) { yield { type: "error", error: "No response body" }; return; }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed.event_type === "text-generation" && parsed.text) yield { type: "delta", content: parsed.text };
+          if (parsed.event_type === "stream-end") { yield { type: "done" }; return; }
+        } catch { /* skip */ }
+      }
+    }
+    yield { type: "done" };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// OpenRouter (unified API for all models)
+async function callOpenRouter(req: LLMRequest): Promise<LLMResponse> {
+  if (!req.apiKey) throw new Error("OpenRouter API key not provided");
+  const baseUrl = (req.baseUrl || "https://openrouter.ai").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "openai/gpt-3.5-turbo", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
+  });
+  if (!response.ok) throw new Error(`OpenRouter error ${response.status}: ${await response.text()}`);
+  const data = await response.json() as any;
+  return { content: data.choices[0]?.message.content || "", promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens, totalTokens: data.usage?.total_tokens, model: data.model || req.model, provider: "openrouter" };
+}
+
+export async function* streamOpenRouter(req: LLMRequest): AsyncGenerator<StreamChunk> {
+  if (!req.apiKey) { yield { type: "error", error: "OpenRouter API key not provided" }; return; }
+  const baseUrl = (req.baseUrl || "https://openrouter.ai").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${req.apiKey}` },
+    body: JSON.stringify({ model: req.model || "openai/gpt-3.5-turbo", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7, stream: true }),
+  });
+  if (!response.ok) { yield { type: "error", error: `OpenRouter error ${response.status}: ${await response.text()}` }; return; }
+  yield* parseSSEStream(response);
+}
+
 // Grok (xAI)
 async function callGrok(req: LLMRequest): Promise<LLMResponse> {
   if (!req.apiKey) throw new Error("Grok API key not provided");
@@ -405,32 +554,99 @@ export async function* streamGrok(req: LLMRequest): AsyncGenerator<StreamChunk> 
   yield* parseSSEStream(response);
 }
 
-// Puter - server-side via REST API if key exists
+// Puter - Free AI via driver API (no key needed)
 async function callPuter(req: LLMRequest): Promise<LLMResponse> {
-  const apiKey = req.apiKey || process.env.PUTER_API_KEY;
-  if (!apiKey) throw new Error("Puter server-side requires PUTER_API_KEY. Use browser puter.js for free access.");
-  const baseUrl = (req.baseUrl || "https://api.puter.com").replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+  console.log("[Puter] Calling model:", req.model || "claude-sonnet-4-6");
+  console.log("[Puter] Messages:", req.messages.length);
+  
+  const response = await fetch("https://api.puter.com/drivers/call", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: req.model || "gpt-4o-mini", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7 }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      interface: "puter-chat-completion",
+      driver: req.model || "claude-sonnet-4-6",
+      method: "complete",
+      args: { messages: req.messages }
+    })
   });
-  if (!response.ok) throw new Error(`Puter error ${response.status}: ${await response.text()}`);
+  
+  console.log("[Puter] Response status:", response.status);
+  
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("[Puter] Error:", text);
+    throw new Error(`Puter error ${response.status}: ${text}`);
+  }
+  
   const data = await response.json() as any;
-  return { content: data.choices?.[0]?.message?.content || "", promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens, totalTokens: data.usage?.total_tokens, model: data.model || req.model, provider: "puter" };
+  console.log("[Puter] Response data:", JSON.stringify(data).substring(0, 200));
+  
+  const content = data.message?.content?.[0]?.text || data.text || "";
+  console.log("[Puter] Content length:", content.length);
+  
+  return { content, model: req.model || "claude-sonnet-4-6", provider: "puter" };
 }
 
 export async function* streamPuter(req: LLMRequest): AsyncGenerator<StreamChunk> {
-  const apiKey = req.apiKey || process.env.PUTER_API_KEY;
-  if (!apiKey) { yield { type: "error", error: "Puter server-side streaming requires PUTER_API_KEY" }; return; }
-  const baseUrl = (req.baseUrl || "https://api.puter.com").replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+  console.log("[Puter Stream] Starting stream for model:", req.model || "claude-sonnet-4-6");
+  
+  const response = await fetch("https://api.puter.com/drivers/call", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: req.model || "gpt-4o-mini", messages: req.messages, max_tokens: req.maxTokens || 4096, temperature: req.temperature ?? 0.7, stream: true }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      interface: "puter-chat-completion",
+      driver: req.model || "claude-sonnet-4-6",
+      method: "complete",
+      args: { messages: req.messages, stream: true }
+    })
   });
-  if (!response.ok) { yield { type: "error", error: `Puter error ${response.status}: ${await response.text()}` }; return; }
-  yield* parseSSEStream(response);
+  
+  console.log("[Puter Stream] Response status:", response.status);
+  
+  if (!response.ok) { 
+    const text = await response.text();
+    console.error("[Puter Stream] Error:", text);
+    yield { type: "error", error: `Puter error ${response.status}: ${text}` }; 
+    return; 
+  }
+  
+  if (!response.body) { 
+    console.error("[Puter Stream] No response body");
+    yield { type: "error", error: "No response body" }; 
+    return; 
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let chunkCount = 0;
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              chunkCount++;
+              yield { type: "delta", content: parsed.text };
+            }
+          } catch {}
+        }
+      }
+    }
+    console.log("[Puter Stream] Completed. Chunks:", chunkCount);
+    yield { type: "done" };
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 // Main dispatcher
@@ -443,6 +659,10 @@ export async function callMultiLLM(req: LLMRequest): Promise<LLMResponse> {
     case "ollama": return callOllama(req);
     case "huggingface": return callHuggingFace(req);
     case "deepseek": return callDeepseek(req);
+    case "groq": return callGroq(req);
+    case "mistral": return callMistral(req);
+    case "cohere": return callCohere(req);
+    case "openrouter": return callOpenRouter(req);
     case "grok": return callGrok(req);
     case "puter": return callPuter(req);
     default: return callBuiltIn(req);
@@ -458,6 +678,10 @@ export function streamMultiLLM(req: LLMRequest): AsyncGenerator<StreamChunk> {
     case "gemini": return streamGemini(req);
     case "ollama": return streamOllama(req);
     case "deepseek": return streamDeepseek(req);
+    case "groq": return streamGroq(req);
+    case "mistral": return streamMistral(req);
+    case "cohere": return streamCohere(req);
+    case "openrouter": return streamOpenRouter(req);
     case "grok": return streamGrok(req);
     case "puter": return streamPuter(req);
     default:
@@ -470,6 +694,7 @@ export function streamMultiLLM(req: LLMRequest): AsyncGenerator<StreamChunk> {
 }
 
 export async function testProviderApiKey(provider: string, apiKey: string, baseUrl?: string): Promise<{ success: boolean; error?: string }> {
+  if (provider === "puter") return { success: true };
   try {
     await callMultiLLM({ messages: [{ role: "user", content: "Say OK." }], provider, apiKey, baseUrl, maxTokens: 10 });
     return { success: true };
@@ -480,12 +705,16 @@ export async function testProviderApiKey(provider: string, apiKey: string, baseU
 
 export const PROVIDER_METADATA = {
   "built-in": { name: "Built-in", icon: "⚡", models: ["gpt-4.1-mini", "gpt-4.1-nano", "gemini-2.5-flash"], requiresKey: false },
-  openai: { name: "OpenAI", icon: "🔑", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo", "o1", "o1-mini", "o3-mini"], requiresKey: true },
-  claude: { name: "Anthropic Claude", icon: "🧠", models: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"], requiresKey: true },
-  gemini: { name: "Google Gemini", icon: "✨", models: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"], requiresKey: true },
+  openai: { name: "OpenAI", icon: "🔑", models: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "text-embedding-3-large", "text-embedding-3-small", "whisper-1", "dall-e-3"], requiresKey: true },
+  claude: { name: "Anthropic Claude", icon: "🧠", models: ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku", "claude-3.5-sonnet", "claude-3.5-haiku"], requiresKey: true },
+  gemini: { name: "Google Gemini", icon: "✨", models: ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.0-pro"], requiresKey: true },
+  groq: { name: "Groq (Ultra-fast)", icon: "⚡", models: ["llama-3.3-70b-versatile", "llama-3.3-70b-specdec", "llama-3.1-8b-instant", "qwen/qwen3-32b", "openai/gpt-oss-120b", "deepseek-r1-distill-llama-70b", "deepseek-r1-distill-qwen-32b", "moonshotai/kimi-k2-instruct-0905"], requiresKey: true },
+  mistral: { name: "Mistral AI", icon: "🌟", models: ["mistral-large", "mistral-medium", "mistral-small", "mixtral-8x7b", "mixtral-8x22b"], requiresKey: true },
+  cohere: { name: "Cohere", icon: "🔷", models: ["command-r", "command-r-plus", "command-light"], requiresKey: true },
+  deepseek: { name: "Deepseek", icon: "🔍", models: ["deepseek-chat", "deepseek-coder", "deepseek-reasoner", "deepseek-v2", "deepseek-r1"], requiresKey: true },
+  openrouter: { name: "OpenRouter", icon: "🌐", models: ["meta-llama/llama-3.3-70b-instruct:free", "meta-llama/llama-3.1-405b-instruct:free", "meta-llama/llama-3.1-70b-instruct:free", "deepseek/deepseek-r1:free", "deepseek/deepseek-r1-0528:free", "qwen/qwen-3-235b-a22b:free", "xiaomi/mimo-v2-flash:free", "mistralai/mistral-small-3.1-24b:free", "mistralai/mistral-small-3.2-24b-instruct:free", "mistralai/mistral-nemo:free", "google/gemma-3-27b-instruct:free", "google/gemma-3-12b-instruct:free", "google/gemma-3-4b-instruct:free", "meta-llama/llama-3.1-8b-instruct:free", "meta-llama/llama-3.2-3b-instruct:free", "mistralai/devstral-2512:free", "qwen/qwen-3-coder:free", "deepseek/deepseek-coder-v2:free", "qwen/qwen2.5-vl-7b:free", "nvidia/nemotron-nano-12b-vl:free", "allenai/molmo-8b:free", "mistralai/mistral-7b-instruct:free", "openchat/openchat-3.5-0106:free", "nousresearch/nous-capybara-7b:free", "gryphe/mythomax-l2-13b:free", "meta-llama/llama-3-8b-instruct:free"], requiresKey: true, note: "Free models available" },
   ollama: { name: "Ollama (Local)", icon: "🦙", models: [], requiresKey: false },
-  huggingface: { name: "Hugging Face", icon: "🤗", models: ["mistralai/Mistral-7B-Instruct-v0.3", "meta-llama/Llama-3.1-8B-Instruct", "google/gemma-2-9b-it", "Qwen/Qwen2.5-7B-Instruct"], requiresKey: true },
-  deepseek: { name: "Deepseek", icon: "🔍", models: ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"], requiresKey: true },
-  grok: { name: "Grok (xAI)", icon: "🤖", models: ["grok-beta", "grok-vision-beta", "grok-2", "grok-2-mini"], requiresKey: true },
-  puter: { name: "Puter (500+ Models)", icon: "☁️", models: ["gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet", "claude-3-haiku", "gemini-1.5-flash", "gemini-1.5-pro", "llama-3.1-70b", "mistral-large"], requiresKey: false, note: "Free via puter.js — no API key needed in browser" },
+  huggingface: { name: "Hugging Face", icon: "🤗", models: [], requiresKey: true },
+  grok: { name: "Grok (xAI)", icon: "🤖", models: ["grok-3", "grok-3-mini", "grok-2", "grok-vision-beta"], requiresKey: true },
+  puter: { name: "Puter (Free Claude)", icon: "☁️", models: ["claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5", "claude-3-7-sonnet", "claude-3-5-sonnet", "claude-3-haiku", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash", "llama-3.3-70b", "llama-3.1-405b", "llama-3.1-70b", "mistral-large", "mistral-small", "deepseek-chat", "deepseek-coder"], requiresKey: false, note: "Free unlimited AI - no API key needed" },
 } as const;

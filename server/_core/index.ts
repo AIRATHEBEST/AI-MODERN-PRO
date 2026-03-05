@@ -36,6 +36,31 @@ async function startServer() {
   registerUploadsRoute(app);
   registerOAuthRoutes(app);
 
+  // ── Seed default user on startup ────────────────────────────────────────────
+  (async () => {
+    try {
+      const { getSupabaseAdmin } = await import("./supabase");
+      const supabase = getSupabaseAdmin();
+      const SEED_EMAIL = "ntshongwanae@gmail.com";
+      const SEED_PASSWORD = "@960145404";
+      const { data: listData } = await supabase.auth.admin.listUsers();
+      const exists = listData?.users?.find(
+        u => u.email?.toLowerCase() === SEED_EMAIL
+      );
+      if (!exists) {
+        await supabase.auth.admin.createUser({
+          email: SEED_EMAIL,
+          password: SEED_PASSWORD,
+          email_confirm: true,
+          user_metadata: { name: "Ntshongwanae" },
+        });
+        console.log("[Seed] Default user created:", SEED_EMAIL);
+      }
+    } catch (e) {
+      console.warn("[Seed] Could not seed default user:", e instanceof Error ? e.message : e);
+    }
+  })();
+
   // ── SSE Streaming ────────────────────────────────────────────────────────────
   app.post("/api/stream/chat", async (req: Request, res: Response) => {
     let user: Awaited<ReturnType<typeof sdk.authenticateRequest>> | null = null;
@@ -44,6 +69,9 @@ async function startServer() {
     const { conversationId, message, provider, model, attachmentUrls } = req.body as {
       conversationId: number; message: string; provider?: string; model?: string; attachmentUrls?: string[];
     };
+    
+    console.log("[SSE] New request - Provider:", provider, "Model:", model);
+    
     if (!message || !conversationId) { res.status(400).json({ error: "message and conversationId required" }); return; }
 
     try {

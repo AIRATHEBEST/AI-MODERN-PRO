@@ -29,11 +29,15 @@ const PROVIDERS = [
   { id: "openai", name: "OpenAI", icon: "🔑", requiresKey: true, placeholder: "sk-..." },
   { id: "claude", name: "Anthropic Claude", icon: "🧠", requiresKey: true, placeholder: "sk-ant-..." },
   { id: "gemini", name: "Google Gemini", icon: "✨", requiresKey: true, placeholder: "AIza..." },
+  { id: "groq", name: "Groq (Ultra-fast)", icon: "⚡", requiresKey: true, placeholder: "gsk_..." },
+  { id: "mistral", name: "Mistral AI", icon: "🌟", requiresKey: true, placeholder: "..." },
+  { id: "cohere", name: "Cohere", icon: "🔷", requiresKey: true, placeholder: "..." },
+  { id: "deepseek", name: "Deepseek", icon: "🔍", requiresKey: true, placeholder: "sk-..." },
+  { id: "openrouter", name: "OpenRouter", icon: "🌐", requiresKey: true, placeholder: "sk-or-..." },
   { id: "ollama", name: "Ollama (Local)", icon: "🦙", requiresKey: false, placeholder: "No key needed — set Base URL" },
   { id: "huggingface", name: "Hugging Face", icon: "🤗", requiresKey: true, placeholder: "hf_..." },
-  { id: "deepseek", name: "Deepseek", icon: "🔍", requiresKey: true, placeholder: "sk-..." },
   { id: "grok", name: "Grok (xAI)", icon: "🤖", requiresKey: true, placeholder: "xai-..." },
-  { id: "puter", name: "Puter (500+ Models)", icon: "☁️", requiresKey: false, placeholder: "Optional — free via browser" },
+  { id: "puter", name: "Puter (Free Claude)", icon: "☁️", requiresKey: false, placeholder: "No key needed — completely free" },
 ];
 
 export function SettingsPanel() {
@@ -54,7 +58,8 @@ export function SettingsPanel() {
 
   const handleAddKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!keyName || !apiKey) {
+    const provider = PROVIDERS.find(p => p.id === selectedProvider);
+    if (!keyName || (provider?.requiresKey && !apiKey)) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -63,17 +68,17 @@ export function SettingsPanel() {
       await upsertKeyMutation.mutateAsync({
         provider: selectedProvider,
         keyName,
-        key: apiKey,
+        key: apiKey || "no-key-needed",
         baseUrl: baseUrl || undefined,
       });
-      toast.success("API key added successfully");
+      toast.success("Configuration saved successfully");
       setShowNewKeyDialog(false);
       setKeyName("");
       setApiKey("");
       setBaseUrl("");
       apiKeysQuery.refetch();
     } catch (error) {
-      toast.error("Failed to add API key");
+      toast.error("Failed to save configuration");
     }
   };
 
@@ -91,6 +96,13 @@ export function SettingsPanel() {
   const handleTestKey = async (id: number) => {
     setTestingId(id);
     try {
+      const key = apiKeysQuery.data?.find(k => k.id === id);
+      if (key?.provider === "puter" || key?.provider === "ollama") {
+        toast.success("Provider configured successfully");
+        apiKeysQuery.refetch();
+        setTestingId(null);
+        return;
+      }
       const result = await testKeyMutation.mutateAsync({ id });
       if (result.success) {
         toast.success("API key is valid");
@@ -163,27 +175,33 @@ export function SettingsPanel() {
                       placeholder="e.g., My OpenAI Key"
                       value={keyName}
                       onChange={(e) => setKeyName(e.target.value)}
+                      required
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="api-key">API Key</Label>
-                    <Input
-                      id="api-key"
-                      type={showKey ? "text" : "password"}
-                      placeholder="Paste your API key"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="base-url">Base URL (Optional)</Label>
-                    <Input
-                      id="base-url"
-                      placeholder="https://api.example.com"
-                      value={baseUrl}
-                      onChange={(e) => setBaseUrl(e.target.value)}
-                    />
-                  </div>
+                  {PROVIDERS.find(p => p.id === selectedProvider)?.requiresKey && (
+                    <div className="space-y-2">
+                      <Label htmlFor="api-key">API Key</Label>
+                      <Input
+                        id="api-key"
+                        type={showKey ? "text" : "password"}
+                        placeholder="Paste your API key"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+                  {(selectedProvider === "ollama" || selectedProvider === "puter") && (
+                    <div className="space-y-2">
+                      <Label htmlFor="base-url">Base URL {selectedProvider === "puter" ? "(Optional)" : ""}</Label>
+                      <Input
+                        id="base-url"
+                        placeholder={selectedProvider === "ollama" ? "http://localhost:11434" : "https://api.puter.com"}
+                        value={baseUrl}
+                        onChange={(e) => setBaseUrl(e.target.value)}
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"

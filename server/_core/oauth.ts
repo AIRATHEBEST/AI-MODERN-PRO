@@ -132,4 +132,34 @@ export function registerOAuthRoutes(app: Express) {
   app.get("/api/oauth/callback", (_req: Request, res: Response) => {
     res.redirect(302, "/");
   });
+
+  /**
+   * POST /api/auth/ensure-user
+   * Creates user in Supabase if they don't exist (for seeded credentials).
+   */
+  app.post("/api/auth/ensure-user", async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body as { email?: string; password?: string };
+      if (!email || !password) {
+        res.status(400).json({ error: "Email and password required" });
+        return;
+      }
+      const supabase = getSupabaseAdmin();
+      const { data: listData } = await supabase.auth.admin.listUsers();
+      const existing = listData?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      if (!existing) {
+        await supabase.auth.admin.createUser({
+          email: email.toLowerCase().trim(),
+          password,
+          email_confirm: true,
+          user_metadata: { name: email.split("@")[0] },
+        });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Auth] ensure-user failed:", error);
+      res.status(500).json({ error: "Failed" });
+    }
+  });
+
 }

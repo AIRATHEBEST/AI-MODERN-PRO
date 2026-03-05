@@ -39,8 +39,10 @@ export function SearchHistory({ onSelectConversation }: SearchHistoryProps) {
     try {
       await deleteConvMutation.mutateAsync({ id: deleteId });
       toast.success("Conversation deleted");
-      conversationsQuery.refetch();
+      await conversationsQuery.refetch();
       setDeleteId(null);
+      // Force UI update
+      window.location.reload();
     } catch (error) {
       toast.error("Failed to delete conversation");
     }
